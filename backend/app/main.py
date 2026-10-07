@@ -3,6 +3,7 @@ Phase 7: FastAPI application entry point.
 Exposes endpoints for health check, dataset upload, profiling, planning, execution, verification, trust, proof, and reports.
 """
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 
 from backend.app.config import DATA_DIR, ARTIFACTS_DIR, REPORTS_DIR
 from backend.app.schemas import Policy, Mapping, Plan
-from backend.app.mapping import infer_mapping, list_entities, latest_year
+from backend.app.mapping import discover_dataset, infer_mapping, list_entities, latest_year
 from backend.app.grouping import is_grouped, execute_grouped
 from backend.app.profiler import profile_dataset
 from backend.app.planner.groq_planner import GroqPlanner
@@ -29,6 +30,7 @@ from backend.app.guard import validate_proof_script_ast
 from backend.app.pdf_report import generate_audit_pdf
 from backend.app.currency import currency_check
 from backend.app.preflight import plan_problems
+from backend.app.visuals import build_visuals
 
 app = FastAPI(title="AuditPilot API", version="1.0.0")
 
@@ -42,12 +44,7 @@ app.add_middleware(
 
 
 def _require_transaction_mapping(mapping: Mapping) -> None:
-    required = {
-        "key_column": mapping.key_column,
-        "date_column": mapping.date_column,
-        "entity_column": mapping.entity_column,
-        "amount_column": mapping.amount_column,
-    }
+    required = {"transactions_table": mapping.transactions_table}
     missing = [name for name, column in required.items() if not column]
     if missing:
         raise HTTPException(
@@ -58,6 +55,10 @@ def _require_transaction_mapping(mapping: Mapping) -> None:
                 "missing_fields": missing,
             },
         )
+
+
+def _dataset_filename(filename: str | None) -> str:
+    return filename or discover_dataset(DATA_DIR)
 
 @app.get("/health")
 def health_check():
@@ -75,50 +76,104 @@ async def upload_dataset(file: UploadFile = File(...), overwrite: bool = False):
         raise HTTPException(
             status_code=409,
             detail=f"{safe_name} already exists. Rename the file, or upload with ?overwrite=true to replace it.")
-    with open(file_path, "wb") as f:
+    temp_name = f".{safe_name}.uploading"
+    temp_path = DATA_DIR / temp_name
+    with open(temp_path, "wb") as f:
         content = await file.read()
-        f.write(content)
-    
-    mapping = infer_mapping(DATA_DIR, safe_name)
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                text = content.decode("cp1252")
+            except UnicodeDecodeError as exc:
+                raise HTTPException(status_code=422, detail="The CSV encoding is not supported. Save it as UTF-8 and try again.") from exc
+        f.write(text.encode("utf-8"))
+
+    final_name = safe_name
+    try:
+        mapping = infer_mapping(DATA_DIR, temp_name)
+        _require_transaction_mapping(mapping)
+        for attempt in range(5):
+            try:
+                temp_path.replace(file_path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    fallback_path = DATA_DIR / f"{Path(safe_name).stem}_{uuid.uuid4().hex[:8]}{Path(safe_name).suffix}"
+                    temp_path.replace(fallback_path)
+                    final_name = fallback_path.name
+                    break
+                await asyncio.sleep(0.1)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    mapping = infer_mapping(DATA_DIR, final_name)
     return {
         "dataset_id": str(uuid.uuid4()),
-        "filename": safe_name,
+        "filename": final_name,
         "mapping": mapping.model_dump()
     }
 
 class ProfileRequest(BaseModel):
-    filename: str = "sales.csv"
+    filename: str | None = None
 
 @app.post("/profile")
 def profile_endpoint(req: ProfileRequest):
-    mapping = infer_mapping(DATA_DIR, req.filename)
+    filename = _dataset_filename(req.filename)
+    mapping = infer_mapping(DATA_DIR, filename)
     _require_transaction_mapping(mapping)
     profile = profile_dataset(DATA_DIR, mapping)
     entities = list_entities(DATA_DIR, mapping)
-    examples = ["What were the total sales?", "How many sales were recorded?"]
+    numeric_columns = [
+        item["name"] for item in profile.get("column_profiles", [])
+        if item.get("numeric_values", 0) > 0
+    ]
+    metric_name = numeric_columns[0] if numeric_columns else mapping.amount_column or "records"
+    examples = [f"What was the total {metric_name}?"]
+    examples.append(f"How many records were in {mapping.transactions_table}?")
     if entities:
-        examples.append(f"What were the total sales for {entities[0]}?")
+        examples.append(f"What was the total {metric_name} for {entities[0]}?")
     if len(entities) >= 2:
-        examples.append(f"Which {mapping.entity_column} sold more: {entities[0]} or {entities[1]}?")
+        examples.append(f"Which {mapping.entity_column} had more {metric_name}: {entities[0]} or {entities[1]}?")
     return {"mapping": mapping.model_dump(), "profile": profile, "examples": examples}
+
+class VisualizeRequest(BaseModel):
+    filename: str | None = None
+    policy: Policy = Policy()
+
+@app.post("/visualize")
+def visualize_endpoint(req: VisualizeRequest):
+    """Chart data (month x entity x category) for the dashboard."""
+    filename = _dataset_filename(req.filename)
+    mapping = infer_mapping(DATA_DIR, filename)
+    _require_transaction_mapping(mapping)
+    out = build_visuals(DATA_DIR, mapping, req.policy)
+    if out.get("error"):
+        raise HTTPException(status_code=422, detail=out["error"])
+    return out
 
 class PlanRequest(BaseModel):
     question: str
-    filename: str = "sales.csv"
+    filename: str | None = None
     policy: Policy = Policy()
 
 @app.post("/plan")
 def plan_endpoint(req: PlanRequest):
-    mapping = infer_mapping(DATA_DIR, req.filename)
+    filename = _dataset_filename(req.filename)
+    mapping = infer_mapping(DATA_DIR, filename)
     _require_transaction_mapping(mapping)
     profile = profile_dataset(DATA_DIR, mapping)
-    schema_summary = {"tables": [req.filename], "entities": list_entities(DATA_DIR, mapping)}
+    schema_summary = {"tables": [filename], "entities": list_entities(DATA_DIR, mapping)}
+    schema_summary["mapping"] = mapping.model_dump()
+    schema_summary["profile"] = profile
     year = latest_year(DATA_DIR, mapping, req.policy.date_format)
     if year:
         schema_summary["default_year"] = year
     planner = GroqPlanner()
-    plan = planner.create_plan(req.question, schema_summary, mapping, req.policy)
+    plan, model_comparison = planner.create_plan_with_comparison(req.question, schema_summary, mapping, req.policy)
     out = plan.model_dump()
+    out["model_comparison"] = model_comparison
     if plan.status == "ready":
         # Tells the client up front which currency questions must be answered before this plan can run.
         out["currency_confirmation"] = currency_check(DATA_DIR, plan, mapping, req.policy)

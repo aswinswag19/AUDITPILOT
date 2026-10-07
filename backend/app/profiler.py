@@ -9,6 +9,30 @@ from pathlib import Path
 from typing import Dict, Any, List
 from backend.app.schemas import Mapping
 
+
+def _column_profile(rows: List[Dict[str, str]], fields: List[str]) -> List[Dict[str, Any]]:
+    """Return lightweight, data-derived metadata for every uploaded column."""
+    result = []
+    for field in fields:
+        values = [(row.get(field) or "").strip() for row in rows]
+        non_empty = [value for value in values if value]
+        numeric = 0
+        for value in non_empty:
+            try:
+                float(value.replace(",", ""))
+                numeric += 1
+            except ValueError:
+                pass
+        result.append({
+            "name": field,
+            "non_empty": len(non_empty),
+            "empty": len(values) - len(non_empty),
+            "numeric_values": numeric,
+            "distinct_values": len(set(non_empty)),
+            "sample_values": list(dict.fromkeys(non_empty))[:5],
+        })
+    return result
+
 def _supported_currencies(data_dir: Path, mapping: Mapping, target: str) -> set:
     """Currencies that can be converted: the reporting currency plus every code in the rates table."""
     supported = {target}
@@ -131,6 +155,7 @@ def profile_dataset(data_dir: Path, mapping: Mapping, target_currency: str = "IN
         "file": mapping.transactions_table,
         "rows": total_rows,
         "columns": len(fields),
+        "column_profiles": _column_profile(rows, fields),
         "quality_score": quality_score,
         "exact_duplicate_groups": exact_dup_groups,
         "conflicting_duplicate_groups": conflicting_dup_groups,

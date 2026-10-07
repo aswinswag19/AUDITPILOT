@@ -202,6 +202,32 @@ export function Answer({ result, plan, trust, proof, proofError, policy, impact,
     );
   }
 
+  if (result.table) {
+    const table = result.table;
+    return (
+      <section className="panel overflow-hidden" aria-live="polite">
+        <div className="border-b border-[var(--border)] px-6 py-5">
+          <h2 className="text-xl font-semibold text-[var(--text)]">Rows from {table.table}</h2>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">{Number(table.row_count || 0).toLocaleString()} rows, {table.columns?.length || 0} columns.</p>
+        </div>
+        <div className="scrollbar-soft max-h-[560px] overflow-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="sticky top-0 bg-[var(--inset)] text-[var(--text-muted)]">
+              <tr>{(table.columns || []).map((column: string) => <th key={column} className="whitespace-nowrap border-b border-[var(--border)] px-4 py-3 font-medium">{column}</th>)}</tr>
+            </thead>
+            <tbody>
+              {(table.rows || []).map((row: Record<string, any>, index: number) => (
+                <tr key={index} className="border-b border-[var(--border)] align-top last:border-0">
+                  {(table.columns || []).map((column: string) => <td key={column} className="whitespace-nowrap px-4 py-3 text-[var(--text-secondary)]">{String(row[column] ?? '')}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
   const analyst = result.analyst || {};
   const inspector = result.inspector || {};
   const verified = analyst.status === 'VERIFIED' && inspector.status === 'VERIFIED';
@@ -273,7 +299,7 @@ export function Answer({ result, plan, trust, proof, proofError, policy, impact,
           {trust?.contradiction?.status === 'CONTRADICTION_DETECTED' && (
             <div className="mt-5 rounded-[12px] border border-[var(--policy)] bg-[var(--policy-soft)] p-4 text-sm leading-6 text-[var(--text-secondary)]">
               <div className="font-medium text-[var(--text)]">This does not match your summary sheet</div>
-              Your summary reports {fmt(trust.contradiction.summary_reported_result)}, but your sales rows add up to {fmt(trust.contradiction.compared_verified_result ?? trust.contradiction.raw_verified_result)} ({trust.contradiction.percentage_difference} apart, {trust.contradiction.compared_scope || 'as provided'}).
+              Your summary reports {fmt(trust.contradiction.summary_reported_result)}, but your transaction rows add up to {fmt(trust.contradiction.compared_verified_result ?? trust.contradiction.raw_verified_result)} ({trust.contradiction.percentage_difference} apart, {trust.contradiction.compared_scope || 'as provided'}).
             </div>
           )}
 

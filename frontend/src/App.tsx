@@ -7,13 +7,15 @@ import { QuestionPanel } from './components/QuestionPanel';
 import { Answer } from './components/Answer';
 import { GroupedAnswer } from './components/GroupedAnswer';
 import { CurrencyConfirmation } from './components/CurrencyConfirmation';
+import { Dashboard } from './components/Dashboard';
+import { ModelComparison } from './components/ModelComparison';
 import {
   ApiError, CurrencyAnswers, uploadDataset, getProfile, createPlan, executePlan, verifyPlan, getTrust,
-  getProof, getImpact, getSensitivity, generateReport, API_BASE_URL,
+  getProof, getImpact, getSensitivity, generateReport, getVisuals, API_BASE_URL,
 } from './lib/api';
 
 const EMPTY_ANSWERS: CurrencyAnswers = { currency_map: {}, conversion_basis: null };
-const DEFAULT_FILE = 'sales.csv';
+const DEFAULT_FILE = '';
 
 export function App() {
   const [filename, setFilename] = useState<string>(DEFAULT_FILE);
@@ -32,18 +34,22 @@ export function App() {
   const [sensitivity, setSensitivity] = useState<any>(null);
   const [proofError, setProofError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [visuals, setVisuals] = useState<any>(null);
+  const [visualsLoading, setVisualsLoading] = useState<boolean>(false);
+  const [visualsError, setVisualsError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadProfile(DEFAULT_FILE);
+    loadProfile();
   }, []);
 
   async function loadProfile(name: string = filename) {
     setProfileLoading(true);
     try {
       const res = await getProfile(name);
-      setProfile(res.profile);
+      setProfile({ ...(res.profile || {}), examples: res.examples || [] });
       if (res.profile?.file) setFilename(res.profile.file);
       setError(null);
+      loadVisuals(res.profile?.file || name);
     } catch (e) {
       console.error(e);
       setError(e instanceof ApiError
@@ -51,6 +57,19 @@ export function App() {
         : 'We could not open your data. Check that the app server is running, or upload a file.');
     } finally {
       setProfileLoading(false);
+    }
+  }
+
+  async function loadVisuals(name: string) {
+    setVisualsLoading(true);
+    setVisualsError(null);
+    try {
+      setVisuals(await getVisuals(name));
+    } catch (e) {
+      setVisuals(null);
+      setVisualsError(e instanceof ApiError ? `We could not draw charts for this file: ${e.readable}` : 'We could not draw charts for this file.');
+    } finally {
+      setVisualsLoading(false);
     }
   }
 
@@ -96,8 +115,8 @@ export function App() {
       await loadProfile(name);
     } catch (err) {
       console.error(err);
-      setError(err instanceof ApiError && err.status === 409
-        ? 'That file was not replaced. Rename it and upload again, or choose to replace it.'
+      setError(err instanceof ApiError
+        ? `That file could not be used: ${err.readable}`
         : 'That file did not upload. Please choose a CSV file and try again.');
     } finally {
       setLoading(false);
@@ -128,6 +147,12 @@ export function App() {
   async function runAnalysis(p: any, ans: CurrencyAnswers) {
     clearOutcome();
     const policy = { currency_map: ans.currency_map, conversion_basis: ans.conversion_basis };
+
+    if (p.intent === 'metadata' || p.requested_output === 'rows') {
+      const table = await executePlan(p, filename, policy);
+      setExecutionResult(table);
+      return;
+    }
 
     // Compare / rank questions: one verified figure per entity (trust and proof are single-figure only).
     if (p.group_by?.length && (p.intent === 'compare' || p.intent === 'rank')) {
@@ -164,10 +189,9 @@ export function App() {
     setLoading(true);
     setError(null);
     clearOutcome();
-    setAnswers(EMPTY_ANSWERS);
     setQuestion(q);
     try {
-      const p = await createPlan(q, filename, {});
+      const p = await createPlan(q, filename, answers);
       setPlan(p);
 
       if (p.status === 'refused') {
@@ -248,6 +272,8 @@ export function App() {
 
   const clarification = plan?.status === 'needs_clarification' ? plan.clarification : null;
   const asked = Boolean(plan) || loading;
+  const hasAnswer = !loading && Boolean(executionResult || grouped);
+  const executedSuccessfully = Boolean(grouped || executionResult?.table || executionResult?.analyst?.status === 'VERIFIED');
   const policyForView = { currency_map: answers.currency_map, conversion_basis: answers.conversion_basis };
 
   return (
@@ -269,7 +295,7 @@ export function App() {
 
       <main className="mx-auto max-w-3xl px-4 pb-16 pt-10">
         <h1 className="display text-4xl leading-[1.1] md:text-5xl">
-          Get answers from your sales data. <span>Checked, not guessed.</span>
+          Get answers from your data. <span>Checked, not guessed.</span>
         </h1>
         <p className="mt-4 max-w-[52ch] text-base leading-7 text-[var(--text-secondary)]">
           Add your file, ask a question, and get a number you can rely on.
@@ -333,6 +359,16 @@ export function App() {
             />
           )}
         </section>
+
+        {hasAnswer && (
+          <section className="mt-10">
+            <StepHeading n={4} title="Explore the data" hint="After your question, click a slice or a bar to filter the other charts." />
+            <Dashboard data={visuals} loading={visualsLoading || profileLoading} error={visualsError} />
+            <div className="mt-4">
+              <ModelComparison candidates={plan?.model_comparison} executedSuccessfully={executedSuccessfully} />
+            </div>
+          </section>
+        )}
       </main>
 
       <footer className="mx-auto flex max-w-3xl items-center gap-2 px-4 pb-10 text-[13px] text-[var(--text-muted)]">

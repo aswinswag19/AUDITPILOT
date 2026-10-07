@@ -23,6 +23,7 @@ REPORTS_DIR = _resolve_dir("REPORTS_DIR", ARTIFACTS_DIR / "reports")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_SECONDARY_MODEL = os.getenv("GROQ_SECONDARY_MODEL", "qwen/qwen3.8-27b")
 GROQ_TIMEOUT_SECONDS = int(os.getenv("GROQ_TIMEOUT_SECONDS", "20"))
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "600"))
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0"))

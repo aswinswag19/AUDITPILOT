@@ -1,13 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, CircleNotch } from '@phosphor-icons/react';
 
-const defaultExamples = [
-  'What were the total sales for Chennai in Q4?',
-  'Compare Chennai and Mumbai in Q3',
-  'Which branch had the highest sales in Q4?',
-];
-
-export function QuestionPanel({ onAsk, loading, examples = defaultExamples }: { onAsk: (q: string) => void; loading: boolean; examples?: string[] }) {
+export function QuestionPanel({ onAsk, loading, examples = [] }: { onAsk: (q: string) => void; loading: boolean; examples?: string[] }) {
   const [question, setQuestion] = useState('');
 
   function submit(value = question) {
@@ -30,7 +24,7 @@ export function QuestionPanel({ onAsk, loading, examples = defaultExamples }: { 
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
           disabled={loading}
           className="focus-ring h-12 w-full rounded-[12px] border border-[var(--border-strong)] bg-[var(--control-bg)] px-4 text-[15px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
-          placeholder="For example: total sales for Chennai in Q4"
+          placeholder="Ask a question about the loaded data"
         />
         <button onClick={() => submit()} disabled={loading || !question.trim()} className="btn btn-primary focus-ring !h-12 sm:w-44">
           {loading ? <CircleNotch className="h-4 w-4 animate-spin" weight="regular" /> : <ArrowRight className="h-4 w-4" weight="regular" />}

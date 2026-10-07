@@ -35,6 +35,7 @@ export class ApiError extends Error {
     if (typeof d === "string") return d;
     if (Array.isArray(d)) return d.map((x) => x?.msg || JSON.stringify(x)).join("; ");
     if (d?.problems?.length) return d.problems.join("; ");
+    if (d?.missing_fields?.length) return `${d.message || "The CSV could not be mapped."} Missing: ${d.missing_fields.join(", ")}.`;
     return d?.message || d?.error || this.message;
   }
 }
@@ -63,16 +64,16 @@ export async function uploadDataset(file: File, overwrite = false) {
   });
 }
 
-export async function getProfile(filename: string = "sales.csv") {
-  return request("/profile", jsonRequest({ filename }));
+export async function getProfile(filename?: string) {
+  return request("/profile", jsonRequest(filename ? { filename } : {}));
 }
 
-export async function createPlan(question: string, filename: string = "sales.csv", policy: Policy = {}) {
-  return request("/plan", jsonRequest({ question, filename, policy }));
+export async function createPlan(question: string, filename?: string, policy: Policy = {}) {
+  return request("/plan", jsonRequest({ question, ...(filename ? { filename } : {}), policy }));
 }
 
-const planCall = (path: string) => (plan: any, filename: string = "sales.csv", policy: Policy = {}) =>
-  request(path, jsonRequest({ plan, filename, policy }));
+const planCall = (path: string) => (plan: any, filename?: string, policy: Policy = {}) =>
+  request(path, jsonRequest({ plan, ...(filename ? { filename } : {}), policy }));
 
 export const checkCurrency = planCall("/currency/check");
 export const executePlan = planCall("/execute");
@@ -84,4 +85,8 @@ export const getSensitivity = planCall("/sensitivity");
 
 export async function generateReport(proofBundle: any, reportType: string = "verified") {
   return request("/reports/generate", jsonRequest({ proof_bundle: proofBundle, report_type: reportType }));
+}
+
+export async function getVisuals(filename?: string, policy: Policy = {}) {
+  return request("/visualize", jsonRequest({ ...(filename ? { filename } : {}), policy }));
 }

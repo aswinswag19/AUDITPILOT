@@ -8,7 +8,24 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from backend.app.schemas import Mapping
 
-def infer_mapping(data_dir: Path, transactions_filename: str = "sales.csv") -> Mapping:
+def discover_dataset(data_dir: Path) -> str:
+    """Find the first CSV that looks like a transaction table."""
+    ignored = {"exchange_rates.csv", "executive_summary.csv"}
+    candidates = sorted(path for path in data_dir.glob("*.csv") if path.name not in ignored and not path.name.startswith("source_rows_export"))
+    for path in candidates:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            fields = {(field or "").lower().replace("_", " ") for field in (csv.DictReader(handle).fieldnames or [])}
+        has_date = any(token in field for field in fields for token in ("date", "timestamp", "time"))
+        has_measure = any(token in field for field in fields for token in ("amount", "revenue", "sales", "total", "value", "price"))
+        if has_date and has_measure:
+            return path.name
+    if candidates:
+        return candidates[0].name
+    return ""
+
+
+def infer_mapping(data_dir: Path, transactions_filename: str = "") -> Mapping:
+    transactions_filename = transactions_filename or discover_dataset(data_dir)
     csv_path = data_dir / transactions_filename
     if "dataset_b" in transactions_filename or transactions_filename == "orders.csv" or not csv_path.exists():
         mapping_json = data_dir / "dataset_b" / "dataset_b_mapping.json"
@@ -40,12 +57,23 @@ def infer_mapping(data_dir: Path, transactions_filename: str = "sales.csv") -> M
         reader = csv.DictReader(f)
         fields = reader.fieldnames or []
 
-    # Heuristic matching for Dataset A
-    key_col = next((f for f in fields if "id" in f.lower() or "invoice" in f.lower()), fields[0] if fields else "")
-    date_col = next((f for f in fields if "date" in f.lower()), "")
-    entity_col = next((f for f in fields if "branch" in f.lower() or "region" in f.lower() or "entity" in f.lower()), "")
-    amount_col = next((f for f in fields if "amount" in f.lower() or "revenue" in f.lower() or "total" in f.lower()), "")
-    currency_col = next((f for f in fields if "currency" in f.lower() or "curr" in f.lower()), "")
+    # Header-driven matching keeps uploaded datasets independent from Dataset A's names.
+    def pick(*needles: str) -> str:
+        return next((field for field in fields if any(needle in field.lower().replace("_", " ") for needle in needles)), "")
+
+    key_col = pick("invoice", "transaction id", "transaction_id", "order id", "order_id", "record id", "record_id", "id")
+    date_col = pick("date", "timestamp", "time", "created", "occurred", "period")
+    entity_col = pick("branch", "region", "entity", "customer", "client", "account", "store", "location", "category", "product", "item")
+    amount_col = pick("amount", "revenue", "sales", "total", "value", "price", "cost", "debit", "credit", "gross", "net", "charge", "fee")
+    currency_col = pick("currency", "curr")
+
+    if not key_col and fields:
+        key_col = fields[0]
+    if not entity_col:
+        # A transaction file may omit an entity dimension; use the first non-metric
+        # column so the rest of the analysis pipeline can still operate.
+        excluded = {key_col, date_col, amount_col, currency_col}
+        entity_col = next((field for field in fields if field not in excluded), "")
 
     rates_table = "exchange_rates.csv" if (data_dir / "exchange_rates.csv").exists() else ""
 

@@ -80,7 +80,8 @@ def execute_pandas_analyst(data_dir: Path, plan: Plan, mapping: Mapping, policy:
     target = policy.target_currency
     basis = policy.conversion_basis or TRANSACTION_DATE
     cmap = policy.currency_map
-    key_col, date_col, amount_col = mapping.key_column, mapping.date_column, mapping.amount_column
+    key_col, date_col = mapping.key_column, mapping.date_column
+    amount_col = plan.metric.column if plan.metric and plan.metric.column else mapping.amount_column
     entity_col, currency_col = mapping.entity_column, mapping.currency_column
 
     start_k = end_k = 0
@@ -92,6 +93,22 @@ def execute_pandas_analyst(data_dir: Path, plan: Plan, mapping: Mapping, policy:
 
     df = pd.read_csv(tx_file, dtype=str).fillna("")
     initial_rows = len(df)
+    if agg == "count" and (not date_col or not amount_col):
+        result = len(df)
+        return {
+            "status": "VERIFIED",
+            "result": str(result),
+            "currency": policy.target_currency,
+            "cleaning_log": ["Counted records without requiring monetary or date columns."],
+            "stage_counts": {"initial": initial_rows, "final_query_rows": result},
+            "source_rows_path": None,
+            "unsupported_in_scope": {"count": 0, "by_currency": {}, "keys": []},
+            "conflicts_in_scope": {"keys": [], "rows": 0},
+            "refunds": {"rows": 0, "total": "0.00", "unmatched_keys": [], "unsupported_rows": 0},
+            "impact_inputs": {},
+            "conversion": {"basis": None, "currency_map": {}, "rows_in_scope": result, "foreign_rows_in_scope": 0, "foreign_currencies_in_scope": []},
+            "generated_code": "# Metadata count: no amount or date column was required.",
+        }
     cleaning_log: List[str] = []
     stage_counts: Dict[str, int] = {"initial": initial_rows}
     multiplier = Decimal(str(mapping.unit_multiplier))
@@ -223,7 +240,7 @@ def execute_pandas_analyst(data_dir: Path, plan: Plan, mapping: Mapping, policy:
     refunds_total = ZERO
     refunds_info: Dict[str, Any] = {"rows": 0, "total": "0.00", "unmatched_keys": [], "unsupported_rows": 0}
     refunds_file = find_table(data_dir, mapping.refunds_table)
-    if refunds_file is not None and policy.refunds == "include_as_negative" and agg == "sum" and key_col in df.columns:
+    if refunds_file is not None and policy.refunds == "include_as_negative" and agg == "sum" and amount_col == mapping.amount_column and key_col in df.columns:
         first = df.drop_duplicates(subset=[key_col], keep="first")
         ok_keys = set(first.loc[entity_mask(first), key_col])
         all_keys = set(first[key_col])

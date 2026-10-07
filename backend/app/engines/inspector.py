@@ -46,8 +46,9 @@ def execute_duckdb_inspector(data_dir: Path, plan: Plan, mapping: Mapping, polic
             return {"status": "FAILED", "result": None,
                     "reason": f"Date range {plan.date_range.start} - {plan.date_range.end} is not valid for format {fmt}."}
 
+    metric_column = plan.metric.column if plan.metric and plan.metric.column else mapping.amount_column
     key, dt, ent = _q(mapping.key_column), _q(mapping.date_column), _q(mapping.entity_column or "")
-    amt, cur = _q(mapping.amount_column), _q(mapping.currency_column or "")
+    amt, cur = _q(metric_column), _q(mapping.currency_column or "")
     mult_i = int(Decimal(str(mapping.unit_multiplier)) * 10000)  # scale 1e4
     HALF, DIV = 50000000000000, 100000000000000  # round half up to cents; scale 1e6*1e4*1e6 / 1e2
 
@@ -100,6 +101,15 @@ def execute_duckdb_inspector(data_dir: Path, plan: Plan, mapping: Mapping, polic
                     clauses.append(f"{alias}.{_q(col)} = {_lit(val)}")
             return " AND ".join(clauses) or "TRUE"
 
+        if agg == "count" and (not mapping.date_column or not mapping.amount_column):
+            total = conn.execute(f"SELECT COUNT(*) FROM transactions t WHERE {entity_where('t')}").fetchone()[0]
+            return {
+                "status": "VERIFIED",
+                "result": str(int(total)),
+                "currency": policy.target_currency,
+                "inspector": "DuckDB",
+            }
+
         def date_where(date_expr: str) -> str:
             if not start_k:
                 return "TRUE"
@@ -139,7 +149,7 @@ def execute_duckdb_inspector(data_dir: Path, plan: Plan, mapping: Mapping, polic
             row = conn.execute(ctes + " SELECT COALESCE(SUM(_cents), 0) FROM scoped").fetchone()
             total = Decimal(str(row[0])) / 100
 
-            if refunds_file is not None and policy.refunds == "include_as_negative":
+            if refunds_file is not None and policy.refunds == "include_as_negative" and metric_column == mapping.amount_column:
                 conn.execute(f"CREATE TABLE refunds AS SELECT * FROM read_csv_auto({_lit(refunds_file)}, all_varchar=True);")
                 rk, ra, rd = _q(mapping.refund_key_column), _q(mapping.refund_amount_column), _q(mapping.refund_date_column)
                 rdate = f"TRY_STRPTIME(TRIM(rf.{rd}), '{pattern}')"

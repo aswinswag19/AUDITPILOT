@@ -74,6 +74,24 @@ def _matched_entities(q_lower: str, valid_entities: List[str]) -> List[str]:
     return found
 
 
+def _metric_column(question: str, schema_summary: Dict[str, Any], mapping: Mapping) -> str:
+    """Choose a real numeric column named or implied by the question."""
+    profiles = schema_summary.get("profile", {}).get("column_profiles", [])
+    candidates = [p for p in profiles if p.get("numeric_values", 0) > 0]
+    if not candidates:
+        return mapping.amount_column or mapping.key_column
+    q_lower = question.lower()
+    for profile in candidates:
+        name = str(profile.get("name", ""))
+        words = re.findall(r"[a-z0-9]+", name.lower())
+        if name.lower() in q_lower or any(
+            len(word) > 2 and re.search(rf"\b{re.escape(word)}\b", q_lower) for word in words
+        ):
+            return name
+    candidate_names = {p.get("name") for p in candidates}
+    return mapping.amount_column if mapping.amount_column in candidate_names else str(candidates[0].get("name"))
+
+
 class SmartRulesPlanner:
     def create_plan(self, question: str, schema_summary: Dict[str, Any], mapping: Mapping, policy: Policy) -> Plan:
         q_lower = question.lower()
@@ -108,7 +126,7 @@ class SmartRulesPlanner:
 
         metric = MetricConfig(
             agg="sum",
-            column=mapping.amount_column or "amount",
+            column=_metric_column(question, schema_summary, mapping),
             convert_currency={
                 "currency_col": mapping.currency_column or "currency",
                 "date_col": mapping.date_column or "order_date",
@@ -116,6 +134,15 @@ class SmartRulesPlanner:
                 "to": policy.target_currency
             }
         )
+
+        if not mapping.amount_column:
+            if re.search(r"\b(how many|number of|count of|count|records|rows)\b", q_lower):
+                metric = metric.model_copy(update={"agg": "count", "column": mapping.key_column})
+            else:
+                return create_refusal(
+                    reason="This file has no numeric amount column, so it can support record counts but not monetary totals.",
+                    missing=["amount_column"],
+                )
 
         # Intent: compare entities (one result per entity)
         if (
