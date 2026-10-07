@@ -1,0 +1,17 @@
+{
+  "transactions_table": "orders.csv",
+  "key_column": "order_id",
+  "date_column": "order_date",
+  "entity_column": "region",
+  "amount_column": "amount",
+  "currency_column": "currency",
+  "rates_table": "exchange_rates_b.csv",
+  "rate_currency_column": "cur",
+  "rate_value_column": "rate",
+  "rate_effective_date_column": "dt",
+  "refunds_table": "refunds.csv",
+  "refund_key_column": "ref_id",
+  "refund_amount_column": "ref_amt",
+  "refund_date_column": "ref_dt",
+  "unit_multiplier": 10
+}

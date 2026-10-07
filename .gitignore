@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment files
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data & Artifacts (keep structure, ignore generated content)
+backend/data/*.csv
+backend/data/*.json
+backend/artifacts/reports/*.pdf
+backend/artifacts/proof_*.py
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.env
+
+# Test
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Misc
+*.log

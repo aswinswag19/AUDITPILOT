@@ -1,0 +1,4 @@
+order_id,order_date,customer_id,region,amount,currency
+ORD-501,10/10/2025,C01,North,1200.0,INR
+ORD-502,12/10/2025,C02,West,450.0,EUR
+ORD-503,20/10/2025,C01,North,800.0,INR
